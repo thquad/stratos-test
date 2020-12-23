@@ -122,7 +122,6 @@ func getEnvironmentLookup() *env.VarSet {
 }
 
 func main() {
-
 	// Register time.Time in gob
 	gob.Register(time.Time{})
 

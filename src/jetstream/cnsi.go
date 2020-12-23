@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -202,6 +203,15 @@ func (p *portalProxy) ListEndpoints() ([]*interfaces.CNSIRecord, error) {
 	cnsiList, err = cnsiRepo.List(p.Config.EncryptionKeyInBytes)
 	if err != nil {
 		return cnsiList, err
+	}
+
+	if len(cnsiList) > 0 {
+		endp := *cnsiList[0]
+		v := reflect.ValueOf(endp)
+		typeOfS := v.Type()
+		for i := 0; i < v.NumField(); i++ {
+			fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
+		}
 	}
 
 	return cnsiList, nil
