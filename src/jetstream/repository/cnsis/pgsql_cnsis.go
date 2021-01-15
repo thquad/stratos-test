@@ -2,9 +2,11 @@ package cnsis
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
+	"runtime/debug"
 
 	"github.com/cloudfoundry-incubator/stratos/src/jetstream/crypto"
 	"github.com/cloudfoundry-incubator/stratos/src/jetstream/datastore"
@@ -132,6 +134,8 @@ func (p *PostgresCNSIRepository) List(encryptionKey []byte) ([]*interfaces.CNSIR
 // ListByUser - Returns a list of CNSIs registered by a user
 func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.ConnectedEndpoint, error) {
 	log.Debug("ListByUser")
+	fmt.Println("userGUID: " + userGUID)
+
 	rows, err := p.db.Query(listCNSIsByUser, "cnsi", userGUID)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to retrieve CNSI records: %v", err)
@@ -142,6 +146,7 @@ func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.Conn
 	clusterList = make([]*interfaces.ConnectedEndpoint, 0)
 
 	for rows.Next() {
+		fmt.Println("found one")
 		var (
 			pCNSIType    string
 			pURL         string
@@ -179,6 +184,38 @@ func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.Conn
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("Unable to List cluster records: %v", err)
 	}
+
+	fmt.Println("Print out all cnsi:")
+	q1rows, q1err := p.db.Query("SELECT guid, name FROM cnsis")
+	if q1err != nil {
+		log.Fatal(err)
+	}
+	for q1rows.Next() {
+		var guid, name string
+		if err := q1rows.Scan(&guid, &name); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(guid + " / " + name)
+	}
+	q1rows.Close()
+
+	//write here a query for all tokens to debug
+	fmt.Println("Print out all token user_guid:")
+	qrows, qerr := p.db.Query("SELECT cnsi_guid, user_guid, token_type FROM tokens")
+	if qerr != nil {
+		log.Fatal(err)
+	}
+	for qrows.Next() {
+		var cnsi_guid, user_guid, token_type string
+		if err := qrows.Scan(&cnsi_guid, &user_guid, &token_type); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(cnsi_guid + " / " + user_guid + " / " + token_type)
+	}
+	qrows.Close()
+
+	res2B, _ := json.Marshal(clusterList)
+	fmt.Println(string(res2B))
 
 	return clusterList, nil
 }
@@ -250,7 +287,22 @@ func (p *PostgresCNSIRepository) findBy(query, match string, encryptionKey []byt
 // Save will persist a CNSI Record to a datastore
 func (p *PostgresCNSIRepository) Save(guid string, cnsi interfaces.CNSIRecord, encryptionKey []byte) error {
 	log.Debug("Save")
+	debug.PrintStack()
 	cipherTextClientSecret, err := crypto.EncryptToken(encryptionKey, cnsi.ClientSecret)
+	fmt.Printf("%s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s \n",
+		guid,
+		cnsi.Name,
+		fmt.Sprintf("%s", cnsi.CNSIType),
+		fmt.Sprintf("%s", cnsi.APIEndpoint),
+		cnsi.AuthorizationEndpoint,
+		cnsi.TokenEndpoint,
+		cnsi.DopplerLoggingEndpoint,
+		cnsi.SkipSSLValidation,
+		cnsi.ClientId,
+		cipherTextClientSecret,
+		cnsi.SSOAllowed,
+		cnsi.SubType,
+		cnsi.Metadata)
 	if err != nil {
 		return err
 	}

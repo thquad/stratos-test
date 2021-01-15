@@ -44,7 +44,6 @@ func init() {
 		createCnsisTable += "doppler_logging_endpoint  VARCHAR(255)  NOT NULL,"
 		createCnsisTable += "skip_ssl_validation       BOOLEAN       NOT NULL DEFAULT FALSE,"
 		createCnsisTable += "last_updated              TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-		createCnsisTable += "created_by                VARCHAR(255)  NOT NULL DEFAULT 'happy user',"
 		createCnsisTable += "PRIMARY KEY (guid) );"
 
 		_, err = txn.Exec(createCnsisTable)

@@ -101,6 +101,7 @@ func InitRepositoryProvider(databaseProvider string) {
 // saveAuthToken - Save the Auth token to the datastore
 func (p *PgsqlTokenRepository) SaveAuthToken(userGUID string, tr interfaces.TokenRecord, encryptionKey []byte) error {
 	log.Debug("SaveAuthToken")
+
 	if userGUID == "" {
 		msg := "Unable to save Auth Token without a valid User GUID."
 		log.Debug(msg)
@@ -185,6 +186,7 @@ func (p *PgsqlTokenRepository) FindAuthToken(userGUID string, encryptionKey []by
 
 	// Get the UAA record from the db
 	err := p.db.QueryRow(findAuthToken, userGUID).Scan(&tokenGUID, &ciphertextAuthToken, &ciphertextRefreshToken, &tokenExpiry, &authType, &metadata)
+
 	if err != nil {
 		msg := "Unable to Find UAA token: %v"
 		log.Debugf(msg, err)

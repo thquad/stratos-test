@@ -57,6 +57,7 @@ func (p *portalProxy) GetStratosAuthService() interfaces.StratosAuth {
 //login is used for both endpoint and direct UAA login
 func (p *portalProxy) login(c echo.Context, skipSSLValidation bool, client string, clientSecret string, endpoint string) (uaaRes *interfaces.UAAResponse, u *interfaces.JWTUserTokenInfo, err error) {
 	log.Debug("login")
+
 	if c.Request().Method == http.MethodGet {
 		code := c.QueryParam("code")
 		state := c.QueryParam("state")

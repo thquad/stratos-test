@@ -68,6 +68,9 @@ func (p *portalProxy) RegisterEndpoint(c echo.Context, fetchInfo interfaces.Info
 		cnsiClientSecret = p.GetConfig().CFClientSecret
 	}
 
+	//TODO make it proper with RegisterEndpointParams?
+	//userId, err := p.GetSessionValue(c, "user_id")
+
 	newCNSI, err := p.DoRegisterEndpoint(params.CNSIName, params.APIEndpoint, skipSSLValidation, cnsiClientId, cnsiClientSecret, ssoAllowed, subType, fetchInfo)
 	if err != nil {
 		return err
@@ -210,8 +213,9 @@ func (p *portalProxy) ListEndpoints() ([]*interfaces.CNSIRecord, error) {
 		v := reflect.ValueOf(endp)
 		typeOfS := v.Type()
 		for i := 0; i < v.NumField(); i++ {
-			fmt.Printf("Field: %s\tValue: %v\n", typeOfS.Field(i).Name, v.Field(i).Interface())
+			fmt.Printf("(%s, %v) ", typeOfS.Field(i).Name, v.Field(i).Interface())
 		}
+		fmt.Printf("\n")
 	}
 
 	return cnsiList, nil

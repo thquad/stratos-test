@@ -124,6 +124,7 @@ func getEnvironmentLookup() *env.VarSet {
 func main() {
 	// Register time.Time in gob
 	gob.Register(time.Time{})
+	log.SetLevel(log.DebugLevel)
 
 	// Create common method for looking up config
 	envLookup := getEnvironmentLookup()
@@ -1111,7 +1112,7 @@ func (p *portalProxy) registerRoutes(e *echo.Echo, needSetupMiddleware bool) {
 
 	// API endpoints with Swagger documentation and accessible with an API key that require admin permissions
 	stableAdminAPIGroup := stableAPIGroup
-	stableAdminAPIGroup.Use(p.adminMiddleware)
+	stableAdminAPIGroup.Use(p.endpointAdminMiddleware)
 
 	// route endpoint creation requests to respecive plugins
 	stableAdminAPIGroup.POST("/endpoints", p.pluginRegisterRouter)
