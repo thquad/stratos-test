@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"runtime/debug"
 
 	"github.com/cloudfoundry-incubator/stratos/src/jetstream/crypto"
 	"github.com/cloudfoundry-incubator/stratos/src/jetstream/datastore"
@@ -21,6 +20,10 @@ var listCNSIsByUser = `SELECT c.guid, c.name, c.cnsi_type, c.api_endpoint, c.dop
 										FROM cnsis c, tokens t
 										WHERE c.guid = t.cnsi_guid AND t.token_type=$1 AND t.user_guid=$2 AND t.disconnected = '0'`
 
+var listCNSIsByCreator = `SELECT guid, name, cnsi_type, api_endpoint, auth_endpoint, token_endpoint, doppler_logging_endpoint, skip_ssl_validation, client_id, client_secret, sso_allowed, sub_type, meta_data, created_by 
+					FROM cnsis
+					WHERE created_by=$1`
+
 var findCNSI = `SELECT guid, name, cnsi_type, api_endpoint, auth_endpoint, token_endpoint, doppler_logging_endpoint, skip_ssl_validation, client_id, client_secret, sso_allowed, sub_type, meta_data, created_by
 						FROM cnsis
 						WHERE guid=$1`
@@ -29,8 +32,8 @@ var findCNSIByAPIEndpoint = `SELECT guid, name, cnsi_type, api_endpoint, auth_en
 						FROM cnsis
 						WHERE api_endpoint=$1`
 
-var saveCNSI = `INSERT INTO cnsis (guid, name, cnsi_type, api_endpoint, auth_endpoint, token_endpoint, doppler_logging_endpoint, skip_ssl_validation, client_id, client_secret, sso_allowed, sub_type, meta_data)
-						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+var saveCNSI = `INSERT INTO cnsis (guid, name, cnsi_type, api_endpoint, auth_endpoint, token_endpoint, doppler_logging_endpoint, skip_ssl_validation, client_id, client_secret, sso_allowed, sub_type, meta_data, created_by)
+						VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
 var deleteCNSI = `DELETE FROM cnsis WHERE guid = $1`
 
@@ -57,6 +60,7 @@ func InitRepositoryProvider(databaseProvider string) {
 	// Modify the database statements if needed, for the given database type
 	listCNSIs = datastore.ModifySQLStatement(listCNSIs, databaseProvider)
 	listCNSIsByUser = datastore.ModifySQLStatement(listCNSIsByUser, databaseProvider)
+	listCNSIsByCreator = datastore.ModifySQLStatement(listCNSIsByCreator, databaseProvider)
 	findCNSI = datastore.ModifySQLStatement(findCNSI, databaseProvider)
 	findCNSIByAPIEndpoint = datastore.ModifySQLStatement(findCNSIByAPIEndpoint, databaseProvider)
 	saveCNSI = datastore.ModifySQLStatement(saveCNSI, databaseProvider)
@@ -134,7 +138,6 @@ func (p *PostgresCNSIRepository) List(encryptionKey []byte) ([]*interfaces.CNSIR
 // ListByUser - Returns a list of CNSIs registered by a user
 func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.ConnectedEndpoint, error) {
 	log.Debug("ListByUser")
-	fmt.Println("userGUID: " + userGUID)
 
 	rows, err := p.db.Query(listCNSIsByUser, "cnsi", userGUID)
 	if err != nil {
@@ -146,7 +149,6 @@ func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.Conn
 	clusterList = make([]*interfaces.ConnectedEndpoint, 0)
 
 	for rows.Next() {
-		fmt.Println("found one")
 		var (
 			pCNSIType    string
 			pURL         string
@@ -185,17 +187,18 @@ func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.Conn
 		return nil, fmt.Errorf("Unable to List cluster records: %v", err)
 	}
 
+	//DEBUG-CODE
 	fmt.Println("Print out all cnsi:")
-	q1rows, q1err := p.db.Query("SELECT guid, name FROM cnsis")
+	q1rows, q1err := p.db.Query("SELECT guid, name, created_by FROM cnsis")
 	if q1err != nil {
 		log.Fatal(err)
 	}
 	for q1rows.Next() {
-		var guid, name string
-		if err := q1rows.Scan(&guid, &name); err != nil {
+		var guid, name, createdBy string
+		if err := q1rows.Scan(&guid, &name, &createdBy); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println(guid + " / " + name)
+		fmt.Println(guid + " / " + name + " / " + createdBy)
 	}
 	q1rows.Close()
 
@@ -218,6 +221,71 @@ func (p *PostgresCNSIRepository) ListByUser(userGUID string) ([]*interfaces.Conn
 	fmt.Println(string(res2B))
 
 	return clusterList, nil
+}
+
+// ListByCreator - Returns a list of CNSIs created by a user
+func (p *PostgresCNSIRepository) ListByCreator(userGUID string, encryptionKey []byte) ([]*interfaces.CNSIRecord, error) {
+	log.Debug("ListByCreator")
+	rows, err := p.db.Query(listCNSIsByCreator, userGUID)
+	if err != nil {
+		return nil, fmt.Errorf("Unable to retrieve CNSI records: %v", err)
+	}
+	defer rows.Close()
+
+	var cnsiList []*interfaces.CNSIRecord
+	cnsiList = make([]*interfaces.CNSIRecord, 0)
+
+	for rows.Next() {
+		var (
+			pCNSIType              string
+			pURL                   string
+			cipherTextClientSecret []byte
+			subType                sql.NullString
+			metadata               sql.NullString
+		)
+
+		cnsi := new(interfaces.CNSIRecord)
+
+		err := rows.Scan(&cnsi.GUID, &cnsi.Name, &pCNSIType, &pURL, &cnsi.AuthorizationEndpoint, &cnsi.TokenEndpoint, &cnsi.DopplerLoggingEndpoint, &cnsi.SkipSSLValidation, &cnsi.ClientId, &cipherTextClientSecret, &cnsi.SSOAllowed, &subType, &metadata, &cnsi.CreatedBy)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to scan CNSI records: %v", err)
+		}
+
+		cnsi.CNSIType = pCNSIType
+
+		if cnsi.APIEndpoint, err = url.Parse(pURL); err != nil {
+			return nil, fmt.Errorf("Unable to parse API Endpoint: %v", err)
+		}
+
+		if subType.Valid {
+			cnsi.SubType = subType.String
+		}
+
+		if metadata.Valid {
+			cnsi.Metadata = metadata.String
+		}
+
+		if len(cipherTextClientSecret) > 0 {
+			plaintextClientSecret, err := crypto.DecryptToken(encryptionKey, cipherTextClientSecret)
+			if err != nil {
+				return nil, err
+			}
+			cnsi.ClientSecret = plaintextClientSecret
+		} else {
+			// Empty secret means there was none, so set the plain text to an empty string
+			cnsi.ClientSecret = ""
+		}
+
+		cnsiList = append(cnsiList, cnsi)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("Unable to List CNSI records: %v", err)
+	}
+
+	// rows.Close()
+
+	return cnsiList, nil
 }
 
 // Find - Returns a single CNSI Record
@@ -287,28 +355,14 @@ func (p *PostgresCNSIRepository) findBy(query, match string, encryptionKey []byt
 // Save will persist a CNSI Record to a datastore
 func (p *PostgresCNSIRepository) Save(guid string, cnsi interfaces.CNSIRecord, encryptionKey []byte) error {
 	log.Debug("Save")
-	debug.PrintStack()
+
 	cipherTextClientSecret, err := crypto.EncryptToken(encryptionKey, cnsi.ClientSecret)
-	fmt.Printf("%s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s / %s \n",
-		guid,
-		cnsi.Name,
-		fmt.Sprintf("%s", cnsi.CNSIType),
-		fmt.Sprintf("%s", cnsi.APIEndpoint),
-		cnsi.AuthorizationEndpoint,
-		cnsi.TokenEndpoint,
-		cnsi.DopplerLoggingEndpoint,
-		cnsi.SkipSSLValidation,
-		cnsi.ClientId,
-		cipherTextClientSecret,
-		cnsi.SSOAllowed,
-		cnsi.SubType,
-		cnsi.Metadata)
 	if err != nil {
 		return err
 	}
 	if _, err := p.db.Exec(saveCNSI, guid, cnsi.Name, fmt.Sprintf("%s", cnsi.CNSIType),
 		fmt.Sprintf("%s", cnsi.APIEndpoint), cnsi.AuthorizationEndpoint, cnsi.TokenEndpoint, cnsi.DopplerLoggingEndpoint, cnsi.SkipSSLValidation,
-		cnsi.ClientId, cipherTextClientSecret, cnsi.SSOAllowed, cnsi.SubType, cnsi.Metadata); err != nil {
+		cnsi.ClientId, cipherTextClientSecret, cnsi.SSOAllowed, cnsi.SubType, cnsi.Metadata, cnsi.CreatedBy); err != nil {
 		return fmt.Errorf("Unable to Save CNSI record: %v", err)
 	}
 

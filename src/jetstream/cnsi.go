@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -68,10 +67,17 @@ func (p *portalProxy) RegisterEndpoint(c echo.Context, fetchInfo interfaces.Info
 		cnsiClientSecret = p.GetConfig().CFClientSecret
 	}
 
-	//TODO make it proper with RegisterEndpointParams?
-	//userId, err := p.GetSessionValue(c, "user_id")
+	sessionValue, err := p.GetSessionValue(c, "user_id")
+	if err != nil {
+		//maybe better to just return error?
+		return interfaces.NewHTTPShadowError(
+			http.StatusInternalServerError,
+			"Failed to get session user",
+			"Failed to get session user: %v", err)
+	}
+	userId := sessionValue.(string)
 
-	newCNSI, err := p.DoRegisterEndpoint(params.CNSIName, params.APIEndpoint, skipSSLValidation, cnsiClientId, cnsiClientSecret, ssoAllowed, subType, fetchInfo)
+	newCNSI, err := p.DoRegisterEndpoint(params.CNSIName, params.APIEndpoint, skipSSLValidation, cnsiClientId, cnsiClientSecret, ssoAllowed, subType, userId, fetchInfo)
 	if err != nil {
 		return err
 	}
@@ -80,7 +86,7 @@ func (p *portalProxy) RegisterEndpoint(c echo.Context, fetchInfo interfaces.Info
 	return nil
 }
 
-func (p *portalProxy) DoRegisterEndpoint(cnsiName string, apiEndpoint string, skipSSLValidation bool, clientId string, clientSecret string, ssoAllowed bool, subType string, fetchInfo interfaces.InfoFunc) (interfaces.CNSIRecord, error) {
+func (p *portalProxy) DoRegisterEndpoint(cnsiName string, apiEndpoint string, skipSSLValidation bool, clientId string, clientSecret string, ssoAllowed bool, subType string, userId string, fetchInfo interfaces.InfoFunc) (interfaces.CNSIRecord, error) {
 
 	if len(cnsiName) == 0 || len(apiEndpoint) == 0 {
 		return interfaces.CNSIRecord{}, interfaces.NewHTTPShadowError(
@@ -138,6 +144,9 @@ func (p *portalProxy) DoRegisterEndpoint(cnsiName string, apiEndpoint string, sk
 	newCNSI.ClientSecret = clientSecret
 	newCNSI.SSOAllowed = ssoAllowed
 	newCNSI.SubType = subType
+	newCNSI.CreatedBy = userId
+
+	fmt.Println(userId)
 
 	err = p.setCNSIRecord(guid, newCNSI)
 
@@ -190,7 +199,67 @@ func (p *portalProxy) unregisterCluster(c echo.Context) error {
 
 func (p *portalProxy) buildCNSIList(c echo.Context) ([]*interfaces.CNSIRecord, error) {
 	log.Debug("buildCNSIList")
+
+	//check user role and filter endpoints, if user has special role
+	userID, err := p.GetSessionValue(c, "user_id")
+	u, err := p.StratosAuthService.GetUser(userID.(string))
+	if err != nil {
+		return nil, err
+	}
+	stratosEndpointAdmin := strings.Contains(strings.Join(u.Scopes, ""), "stratos.endpointadmin")
+	if stratosEndpointAdmin == true {
+		return p.ListAdminEndpoints(userID.(string))
+	}
+
 	return p.ListEndpoints()
+}
+
+//return a CNSI list with endpoints created by the current endpointadmin and all admins
+func (p *portalProxy) ListAdminEndpoints(userID string) ([]*interfaces.CNSIRecord, error) {
+	log.Debug("ListAdminEndpoints")
+
+	var cnsiList []*interfaces.CNSIRecord
+	var adminList []string
+	var err error
+
+	//look up all admin ids in tokens
+	tokenRepo, err := p.GetStoreFactory().TokenStore()
+	if err != nil {
+		return cnsiList, fmt.Errorf("listRegisteredTokens: %s", err)
+	}
+	tokenList, err := tokenRepo.ListAuthToken(p.Config.EncryptionKeyInBytes)
+	if err != nil {
+		return cnsiList, err
+	}
+
+	//search for admins and add them to list
+	for _, token := range tokenList {
+		tokenInfo, err := p.GetUserTokenInfo(token.AuthToken)
+		if err != nil {
+			return cnsiList, err
+		}
+		stratosAdmin := strings.Contains(strings.Join(tokenInfo.Scope, ""), "stratos.admin")
+		if stratosAdmin == true {
+			adminList = append(adminList, tokenInfo.UserGUID)
+		}
+	}
+	adminList = append(adminList, userID)
+
+	//get a cnsi list from every admin found and current endpointadmin
+	cnsiRepo, err := p.GetStoreFactory().EndpointStore()
+	if err != nil {
+		return cnsiList, fmt.Errorf("listRegisteredCNSIs: %s", err)
+	}
+
+	for _, adminID := range adminList {
+		creatorList, err := cnsiRepo.ListByCreator(adminID, p.Config.EncryptionKeyInBytes)
+		if err != nil {
+			return creatorList, err
+		}
+		cnsiList = append(cnsiList, creatorList...)
+	}
+
+	return cnsiList, nil
 }
 
 func (p *portalProxy) ListEndpoints() ([]*interfaces.CNSIRecord, error) {
@@ -206,16 +275,6 @@ func (p *portalProxy) ListEndpoints() ([]*interfaces.CNSIRecord, error) {
 	cnsiList, err = cnsiRepo.List(p.Config.EncryptionKeyInBytes)
 	if err != nil {
 		return cnsiList, err
-	}
-
-	if len(cnsiList) > 0 {
-		endp := *cnsiList[0]
-		v := reflect.ValueOf(endp)
-		typeOfS := v.Type()
-		for i := 0; i < v.NumField(); i++ {
-			fmt.Printf("(%s, %v) ", typeOfS.Field(i).Name, v.Field(i).Interface())
-		}
-		fmt.Printf("\n")
 	}
 
 	return cnsiList, nil

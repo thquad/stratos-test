@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -109,6 +110,16 @@ func (c *CloudFoundrySpecification) cfLoginHook(context echo.Context) error {
 		return nil
 	}
 
+	sessionValue, err := c.portalProxy.GetSessionValue(context, "user_id")
+	if err != nil {
+		//maybe better to just return error?
+		return interfaces.NewHTTPShadowError(
+			http.StatusInternalServerError,
+			"Failed to get session user",
+			"Failed to get session user: %v", err)
+	}
+	userId := sessionValue.(string)
+
 	// CF auto reg cnsi entry missing, attempt to register
 	if cfCnsi.CNSIType == "" {
 		cfEndpointSpec, _ := c.portalProxy.GetEndpointTypeSpec("cf")
@@ -122,7 +133,7 @@ func (c *CloudFoundrySpecification) cfLoginHook(context echo.Context) error {
 		log.Infof("Auto-registering cloud foundry endpoint %s as \"%s\"", cfAPI, autoRegName)
 
 		// Auto-register the Cloud Foundry
-		cfCnsi, err = c.portalProxy.DoRegisterEndpoint(autoRegName, cfAPI, true, c.portalProxy.GetConfig().CFClient, c.portalProxy.GetConfig().CFClientSecret, false, "", cfEndpointSpec.Info)
+		cfCnsi, err = c.portalProxy.DoRegisterEndpoint(autoRegName, cfAPI, true, c.portalProxy.GetConfig().CFClient, c.portalProxy.GetConfig().CFClientSecret, false, "", userId, cfEndpointSpec.Info)
 		if err != nil {
 			log.Errorf("Could not auto-register Cloud Foundry endpoint: %v", err)
 			return nil
